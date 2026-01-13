@@ -1,0 +1,219 @@
+name: Release
+
+on:
+  workflow_call:
+    inputs:
+      binary_name:
+        description: 'Name of the binary'
+        type: string
+        required: true
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+    with:
+      binary_name: ${{ inputs.binary_name }}
+      optimize: ReleaseFast
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Get version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Create release archives
+        run: |
+          cd artifacts
+          for dir in */; do
+            name="${dir%/}"
+            mv "$dir"/* "$dir/${{ inputs.binary_name }}"
+            chmod +x "$dir/${{ inputs.binary_name }}"
+            tar -czvf "${name}-${{ steps.version.outputs.VERSION }}.tar.gz" -C "$dir" ${{ inputs.binary_name }}
+            sha256sum "${name}-${{ steps.version.outputs.VERSION }}.tar.gz" > "${name}-${{ steps.version.outputs.VERSION }}.tar.gz.sha256"
+          done
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/*.tar.gz
+            artifacts/*.sha256
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref, '-') }}
+
+  docker-build:
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+          - arch: arm64
+            platform: linux/arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Linux ${{ matrix.arch }} binary
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.binary_name }}-linux-${{ matrix.arch }}
+          path: .
+
+      - name: Rename binary
+        run: mv ${{ inputs.binary_name }}-linux-${{ matrix.arch }} ${{ inputs.binary_name }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Build and push arch-specific image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: ${{ matrix.platform }}
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ github.repository }}:${{ steps.version.outputs.VERSION }}-${{ matrix.arch }}
+          build-args: |
+            BINARY_NAME=${{ inputs.binary_name }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  docker-manifest:
+    needs: docker-build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get version from tag
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          MAJOR=$(echo $VERSION | cut -d. -f1)
+          MINOR=$(echo $VERSION | cut -d. -f2)
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "MAJOR=$MAJOR" >> $GITHUB_OUTPUT
+          echo "MINOR=$MINOR" >> $GITHUB_OUTPUT
+
+      - name: Create and push multi-arch manifests
+        run: |
+          IMAGE=${{ env.REGISTRY }}/${{ github.repository }}
+          VERSION=${{ steps.version.outputs.VERSION }}
+          MAJOR=${{ steps.version.outputs.MAJOR }}
+          MINOR=${{ steps.version.outputs.MINOR }}
+
+          # Create manifest for full version
+          docker manifest create ${IMAGE}:${VERSION} \
+            ${IMAGE}:${VERSION}-amd64 \
+            ${IMAGE}:${VERSION}-arm64
+          docker manifest push ${IMAGE}:${VERSION}
+
+          # Create manifest for major.minor
+          docker manifest create ${IMAGE}:${MAJOR}.${MINOR} \
+            ${IMAGE}:${VERSION}-amd64 \
+            ${IMAGE}:${VERSION}-arm64
+          docker manifest push ${IMAGE}:${MAJOR}.${MINOR}
+
+          # Create manifest for major
+          docker manifest create ${IMAGE}:${MAJOR} \
+            ${IMAGE}:${VERSION}-amd64 \
+            ${IMAGE}:${VERSION}-arm64
+          docker manifest push ${IMAGE}:${MAJOR}
+
+          # Create manifest for latest
+          docker manifest create ${IMAGE}:latest \
+            ${IMAGE}:${VERSION}-amd64 \
+            ${IMAGE}:${VERSION}-arm64
+          docker manifest push ${IMAGE}:latest
+
+  update-formula:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get version from tag
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Calculate release tarball SHA256s
+        id: sha
+        run: |
+          BASE_URL="https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.VERSION }}"
+
+          curl -sL "${BASE_URL}/${{ inputs.binary_name }}-macos-arm64-${{ steps.version.outputs.VERSION }}.tar.gz" -o macos-arm64.tar.gz
+          echo "MACOS_ARM64=$(sha256sum macos-arm64.tar.gz | cut -d' ' -f1)" >> $GITHUB_OUTPUT
+
+          curl -sL "${BASE_URL}/${{ inputs.binary_name }}-linux-amd64-${{ steps.version.outputs.VERSION }}.tar.gz" -o linux-amd64.tar.gz
+          echo "LINUX_AMD64=$(sha256sum linux-amd64.tar.gz | cut -d' ' -f1)" >> $GITHUB_OUTPUT
+
+          curl -sL "${BASE_URL}/${{ inputs.binary_name }}-linux-arm64-${{ steps.version.outputs.VERSION }}.tar.gz" -o linux-arm64.tar.gz
+          echo "LINUX_ARM64=$(sha256sum linux-arm64.tar.gz | cut -d' ' -f1)" >> $GITHUB_OUTPUT
+
+      - name: Update Homebrew formula
+        run: |
+          FORMULA="Formula/${{ inputs.binary_name }}.rb"
+          VERSION="${{ steps.version.outputs.VERSION }}"
+
+          if [ -f "$FORMULA" ]; then
+            # Update version
+            sed -i "s|version \".*\"|version \"${VERSION#v}\"|" "$FORMULA"
+
+            # Update SHA256 placeholders or existing hashes
+            sed -i "s|PLACEHOLDER_SHA256_MACOS_ARM64|${{ steps.sha.outputs.MACOS_ARM64 }}|" "$FORMULA"
+            sed -i "s|PLACEHOLDER_SHA256_LINUX_AMD64|${{ steps.sha.outputs.LINUX_AMD64 }}|" "$FORMULA"
+            sed -i "s|PLACEHOLDER_SHA256_LINUX_ARM64|${{ steps.sha.outputs.LINUX_ARM64 }}|" "$FORMULA"
+
+            # Update existing hashes for subsequent releases
+            sed -i "s|sha256 \"[a-f0-9]\{64\}\" # macos-arm64|sha256 \"${{ steps.sha.outputs.MACOS_ARM64 }}\" # macos-arm64|" "$FORMULA"
+            sed -i "s|sha256 \"[a-f0-9]\{64\}\" # linux-amd64|sha256 \"${{ steps.sha.outputs.LINUX_AMD64 }}\" # linux-amd64|" "$FORMULA"
+            sed -i "s|sha256 \"[a-f0-9]\{64\}\" # linux-arm64|sha256 \"${{ steps.sha.outputs.LINUX_ARM64 }}\" # linux-arm64|" "$FORMULA"
+          fi
+
+      - name: Commit and push formula update
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/ || true
+          git commit -m "Update formula to ${{ steps.version.outputs.VERSION }}" || exit 0
+          git push origin HEAD:main
