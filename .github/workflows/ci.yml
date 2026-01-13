@@ -46,11 +46,10 @@ jobs:
           name: ${{ inputs.binary_name }}-macos-arm64
           path: ./zig-out/bin/
 
-      - name: Make executable
-        run: chmod +x ./zig-out/bin/${{ inputs.binary_name }}
-
-      - name: Rename binary for tests
-        run: mv ./zig-out/bin/${{ inputs.binary_name }}-macos-arm64 ./zig-out/bin/${{ inputs.binary_name }}
+      - name: Setup binary
+        run: |
+          mv ./zig-out/bin/${{ inputs.binary_name }}-macos-arm64 ./zig-out/bin/${{ inputs.binary_name }}
+          chmod +x ./zig-out/bin/${{ inputs.binary_name }}
 
       - name: Run GNU compatibility tests
         run: |
@@ -70,11 +69,10 @@ jobs:
           name: ${{ inputs.binary_name }}-linux-amd64
           path: ./zig-out/bin/
 
-      - name: Make executable
-        run: chmod +x ./zig-out/bin/${{ inputs.binary_name }}
-
-      - name: Rename binary for tests
-        run: mv ./zig-out/bin/${{ inputs.binary_name }}-linux-amd64 ./zig-out/bin/${{ inputs.binary_name }}
+      - name: Setup binary
+        run: |
+          mv ./zig-out/bin/${{ inputs.binary_name }}-linux-amd64 ./zig-out/bin/${{ inputs.binary_name }}
+          chmod +x ./zig-out/bin/${{ inputs.binary_name }}
 
       - name: Run GNU compatibility tests
         run: |
