@@ -26,7 +26,7 @@ jobs:
           submodules: recursive
 
       - name: Install dependencies
-        run: brew install molten-vk shaderc
+        run: brew bundle
 
       - name: Install Zig
         uses: goto-bus-stop/setup-zig@v2
