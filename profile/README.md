@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="https://raw.githubusercontent.com/e-jerk/logo/main/logo-animated.png" alt="e/jerk logo" width="256">
+</p>
+
 # e-jerk
 
 > **⚠️🚨 WARNING 🚨⚠️**
