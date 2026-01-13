@@ -17,24 +17,21 @@ GPU-accelerated Unix utilities with Zig frontends and Metal/Vulkan compute backe
 ### Homebrew (macOS/Linux)
 
 ```bash
-# Add the tap
-brew tap e-jerk/tap
+# Install all GPU utilities at once
+brew install e-jerk/utils/gpu-utils
 
-# Install all utilities
-brew install e-jerk/tap/grep e-jerk/tap/sed e-jerk/tap/find e-jerk/tap/gawk
-
-# Or install individually
-brew install e-jerk/tap/grep
-brew install e-jerk/tap/sed
-brew install e-jerk/tap/find
-brew install e-jerk/tap/gawk
+# Or install individually from each repo's tap
+brew install e-jerk/grep/grep
+brew install e-jerk/sed/sed
+brew install e-jerk/find/find
 ```
 
-The binaries are prefixed with `ej-` to avoid conflicts with system utilities:
-- `ej-grep` - GPU-accelerated grep
-- `ej-sed` - GPU-accelerated sed
-- `ej-find` - GPU-accelerated find
-- `ej-gawk` - GPU-accelerated awk
+These utilities override the system commands and support GPU acceleration:
+- `grep` - Use `--gpu`, `--metal`, or `--vulkan` for GPU mode
+- `sed` - Use `--gpu`, `--metal`, or `--vulkan` for GPU mode
+- `find` - Use `--gpu`, `--metal`, or `--vulkan` for GPU mode
+
+Use `--cpu` to force CPU-only mode.
 
 ## Packages
 
