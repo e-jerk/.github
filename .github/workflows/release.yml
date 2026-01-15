@@ -56,28 +56,31 @@ jobs:
           draft: false
           prerelease: ${{ contains(github.ref, '-') }}
 
-  docker-build:
+  docker:
     needs: build
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - arch: amd64
-            platform: linux/amd64
-          - arch: arm64
-            platform: linux/arm64
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download Linux ${{ matrix.arch }} binary
+      - name: Download Linux amd64 binary
         uses: actions/download-artifact@v4
         with:
-          name: ${{ inputs.binary_name }}-linux-${{ matrix.arch }}
-          path: .
+          name: ${{ inputs.binary_name }}-linux-amd64
+          path: binaries/amd64
 
-      - name: Rename binary
-        run: mv ${{ inputs.binary_name }}-linux-${{ matrix.arch }} ${{ inputs.binary_name }}
+      - name: Download Linux arm64 binary
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.binary_name }}-linux-arm64
+          path: binaries/arm64
+
+      - name: Prepare binaries for Docker build
+        run: |
+          mv binaries/amd64/${{ inputs.binary_name }}-linux-amd64 binaries/amd64/${{ inputs.binary_name }}
+          mv binaries/arm64/${{ inputs.binary_name }}-linux-arm64 binaries/arm64/${{ inputs.binary_name }}
+          chmod +x binaries/amd64/${{ inputs.binary_name }}
+          chmod +x binaries/arm64/${{ inputs.binary_name }}
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -92,74 +95,30 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Get version from tag
-        id: version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest,enable={{is_default_branch}}
 
-      - name: Build and push arch-specific image
+      - name: Build and push multi-arch image
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile
-          platforms: ${{ matrix.platform }}
+          platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ env.REGISTRY }}/${{ github.repository }}:${{ steps.version.outputs.VERSION }}-${{ matrix.arch }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             BINARY_NAME=${{ inputs.binary_name }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-  docker-manifest:
-    needs: docker-build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Log in to Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Get version from tag
-        id: version
-        run: |
-          VERSION=${GITHUB_REF#refs/tags/v}
-          MAJOR=$(echo $VERSION | cut -d. -f1)
-          MINOR=$(echo $VERSION | cut -d. -f2)
-          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
-          echo "MAJOR=$MAJOR" >> $GITHUB_OUTPUT
-          echo "MINOR=$MINOR" >> $GITHUB_OUTPUT
-
-      - name: Create and push multi-arch manifests
-        run: |
-          IMAGE=${{ env.REGISTRY }}/${{ github.repository }}
-          VERSION=${{ steps.version.outputs.VERSION }}
-          MAJOR=${{ steps.version.outputs.MAJOR }}
-          MINOR=${{ steps.version.outputs.MINOR }}
-
-          # Create manifest for full version
-          docker manifest create ${IMAGE}:${VERSION} \
-            ${IMAGE}:${VERSION}-amd64 \
-            ${IMAGE}:${VERSION}-arm64
-          docker manifest push ${IMAGE}:${VERSION}
-
-          # Create manifest for major.minor
-          docker manifest create ${IMAGE}:${MAJOR}.${MINOR} \
-            ${IMAGE}:${VERSION}-amd64 \
-            ${IMAGE}:${VERSION}-arm64
-          docker manifest push ${IMAGE}:${MAJOR}.${MINOR}
-
-          # Create manifest for major
-          docker manifest create ${IMAGE}:${MAJOR} \
-            ${IMAGE}:${VERSION}-amd64 \
-            ${IMAGE}:${VERSION}-arm64
-          docker manifest push ${IMAGE}:${MAJOR}
-
-          # Create manifest for latest
-          docker manifest create ${IMAGE}:latest \
-            ${IMAGE}:${VERSION}-amd64 \
-            ${IMAGE}:${VERSION}-arm64
-          docker manifest push ${IMAGE}:latest
 
   update-formula:
     needs: release
