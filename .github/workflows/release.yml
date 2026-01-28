@@ -17,9 +17,13 @@ env:
 
 jobs:
   build:
+    strategy:
+      matrix:
+        build_variant: [pure, gnu]
     uses: ./.github/workflows/build.yml
     with:
       binary_name: ${{ inputs.binary_name }}
+      build_variant: ${{ matrix.build_variant }}
       optimize: ReleaseFast
 
   release:
@@ -40,9 +44,15 @@ jobs:
           cd artifacts
           for dir in */; do
             name="${dir%/}"
-            mv "$dir"/* "$dir/${{ inputs.binary_name }}"
-            chmod +x "$dir/${{ inputs.binary_name }}"
-            tar -czvf "${name}-${{ steps.version.outputs.VERSION }}.tar.gz" -C "$dir" ${{ inputs.binary_name }}
+            # Extract variant from directory name (e.g., grep-gnu-macos-arm64 -> grep-gnu, grep-macos-arm64 -> grep)
+            if [[ "$name" == *"-gnu-"* ]]; then
+              binary_name="${{ inputs.binary_name }}"
+            else
+              binary_name="${{ inputs.binary_name }}"
+            fi
+            mv "$dir"/* "$dir/${binary_name}"
+            chmod +x "$dir/${binary_name}"
+            tar -czvf "${name}-${{ steps.version.outputs.VERSION }}.tar.gz" -C "$dir" "${binary_name}"
             sha256sum "${name}-${{ steps.version.outputs.VERSION }}.tar.gz" > "${name}-${{ steps.version.outputs.VERSION }}.tar.gz.sha256"
           done
 
@@ -59,28 +69,12 @@ jobs:
   docker:
     needs: build
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        variant: [pure, gnu]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Download Linux amd64 binary
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ inputs.binary_name }}-linux-amd64
-          path: binaries/amd64
-
-      - name: Download Linux arm64 binary
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ inputs.binary_name }}-linux-arm64
-          path: binaries/arm64
-
-      - name: Prepare binaries for Docker build
-        run: |
-          mv binaries/amd64/${{ inputs.binary_name }}-linux-amd64 binaries/amd64/${{ inputs.binary_name }}
-          mv binaries/arm64/${{ inputs.binary_name }}-linux-arm64 binaries/arm64/${{ inputs.binary_name }}
-          chmod +x binaries/amd64/${{ inputs.binary_name }}
-          chmod +x binaries/arm64/${{ inputs.binary_name }}
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -99,7 +93,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ github.repository }}
+          images: ${{ env.REGISTRY }}/${{ github.repository }}${{ matrix.variant == 'gnu' && '-gnu' || '' }}
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
@@ -111,12 +105,14 @@ jobs:
         with:
           context: .
           file: ./Dockerfile
+          target: runtime
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             BINARY_NAME=${{ inputs.binary_name }}
+            BUILD_VARIANT=${{ matrix.variant }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -134,25 +130,44 @@ jobs:
         run: |
           VERSION=${GITHUB_REF#refs/tags/}
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "BASE_URL=https://github.com/${{ github.repository }}/releases/download/$VERSION" >> $GITHUB_OUTPUT
 
       - name: Calculate release tarball SHA256s
         id: sha
         run: |
-          BASE_URL="https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.VERSION }}"
-
-          curl -sL "${BASE_URL}/${{ inputs.binary_name }}-macos-arm64-${{ steps.version.outputs.VERSION }}.tar.gz" -o macos-arm64.tar.gz
-          echo "MACOS_ARM64=$(sha256sum macos-arm64.tar.gz | cut -d' ' -f1)" >> $GITHUB_OUTPUT
-
-          curl -sL "${BASE_URL}/${{ inputs.binary_name }}-linux-amd64-${{ steps.version.outputs.VERSION }}.tar.gz" -o linux-amd64.tar.gz
-          echo "LINUX_AMD64=$(sha256sum linux-amd64.tar.gz | cut -d' ' -f1)" >> $GITHUB_OUTPUT
-
-          curl -sL "${BASE_URL}/${{ inputs.binary_name }}-linux-arm64-${{ steps.version.outputs.VERSION }}.tar.gz" -o linux-arm64.tar.gz
-          echo "LINUX_ARM64=$(sha256sum linux-arm64.tar.gz | cut -d' ' -f1)" >> $GITHUB_OUTPUT
+          for target in "macos-arm64" "linux-amd64" "linux-arm64"; do
+            for variant in "-gnu" ""; do
+              curl -sL "${{ steps.version.outputs.BASE_URL }}/${{ inputs.binary_name }}${variant}-${target}-${{ steps.version.outputs.VERSION }}.tar.gz" -o "${{ inputs.binary_name }}${variant}-${target}.tar.gz"
+              SHA256=$(sha256sum "${{ inputs.binary_name }}${variant}-${target}.tar.gz" | cut -d' ' -f1)
+              output_name="${target}"
+              if [ "$variant" == "-gnu" ]; then
+                output_name="${target}_GNU"
+              fi
+              echo "${output_name^^}=$SHA256" >> $GITHUB_OUTPUT
+            done
+          done
+          
 
       - name: Update Homebrew formula
         run: |
+          FORMULA_GNU="Formula/${{ inputs.binary_name }}-gnu.rb"
           FORMULA="Formula/${{ inputs.binary_name }}.rb"
           VERSION="${{ steps.version.outputs.VERSION }}"
+
+          if [ -f "$FORMULA_GNU" ]; then
+            # Update version
+            sed -i "s|version \".*\"|version \"${VERSION#v}\"|" "$FORMULA_GNU"
+
+            # Update SHA256 placeholders or existing hashes
+            sed -i "s|PLACEHOLDER_SHA256_MACOS_ARM64|${{ steps.sha.outputs.MACOS_ARM64_GNU }}|" "$FORMULA_GNU"
+            sed -i "s|PLACEHOLDER_SHA256_LINUX_AMD64|${{ steps.sha.outputs.LINUX_AMD64_GNU }}|" "$FORMULA_GNU"
+            sed -i "s|PLACEHOLDER_SHA256_LINUX_ARM64|${{ steps.sha.outputs.LINUX_ARM64_GNU }}|" "$FORMULA_GNU"
+
+            # Update existing hashes for subsequent releases
+            sed -i "s|sha256 \"[a-f0-9]\{64\}\" # macos-arm64|sha256 \"${{ steps.sha.outputs.MACOS_ARM64_GNU }}\" # macos-arm64|" "$FORMULA_GNU"
+            sed -i "s|sha256 \"[a-f0-9]\{64\}\" # linux-amd64|sha256 \"${{ steps.sha.outputs.LINUX_AMD64_GNU }}\" # linux-amd64|" "$FORMULA_GNU"
+            sed -i "s|sha256 \"[a-f0-9]\{64\}\" # linux-arm64|sha256 \"${{ steps.sha.outputs.LINUX_ARM64_GNU }}\" # linux-arm64|" "$FORMULA_GNU"
+          fi
 
           if [ -f "$FORMULA" ]; then
             # Update version
