@@ -11,6 +11,7 @@ on:
 jobs:
   # Only run Zig tests on macOS (has MoltenVK for Vulkan support)
   # Linux runners don't have GPUs so Vulkan tests would fail
+  # Use -Dgnu=true to enable all backends (Metal + Vulkan) for comprehensive testing
   test-zig:
     runs-on: macos-latest
     steps:
@@ -25,7 +26,7 @@ jobs:
           version: 0.15.2
 
       - name: Run Zig tests
-        run: zig build test
+        run: zig build test -Dgnu=true
 
   build:
     needs: [test-zig]
