@@ -33,7 +33,7 @@ jobs:
         run: brew bundle
 
       - name: Install Zig
-        uses: goto-bus-stop/setup-zig@v2
+        uses: https://codeberg.org/mlugg/setup-zig@v2
         with:
           version: ${{ inputs.zig_version }}
 
