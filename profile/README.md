@@ -12,28 +12,42 @@
 
 GPU-accelerated Unix utilities with Zig frontends and Metal/Vulkan compute backends.
 
+## Build Variants
+
+Each utility is available in **two variants**:
+
+| Variant | Description | Vulkan on macOS | `--gnu` flag |
+|---------|-------------|-----------------|--------------|
+| **pure** | Zig + SIMD + GPU only. Self-contained, no external dependencies. Source code is public domain (Unlicense). | No | Not available |
+| **gnu** | Includes GNU utilities + Vulkan via MoltenVK for full POSIX compliance. Binaries are GPL-3.0-or-later. | Yes | Works |
+
 ## Installation
 
 ### Homebrew (macOS/Linux)
 
 ```bash
-# Install all GPU utilities at once
+# Install pure builds (default, self-contained)
 brew install e-jerk/utils/gpu-utils
 
-# Or install individually from each repo's tap
-brew install e-jerk/grep/grep
-brew install e-jerk/sed/sed
-brew install e-jerk/find/find
-brew install e-jerk/gawk/gawk
+# Install gnu builds (with GNU fallback)
+brew install e-jerk/utils/gpu-utils-gnu
+
+# Or install individually
+brew install e-jerk/grep/grep       # pure
+brew install e-jerk/grep/grep-gnu   # gnu
 ```
 
-These utilities override the system commands and support GPU acceleration:
-- `grep` - Use `--gpu`, `--metal`, or `--vulkan` for GPU mode
-- `sed` - Use `--gpu`, `--metal`, or `--vulkan` for GPU mode
-- `find` - Use `--gpu`, `--metal`, or `--vulkan` for GPU mode
-- `gawk` - Use `--gpu`, `--metal`, or `--vulkan` for GPU mode
+### Backend Selection
 
-Use `--cpu` to force CPU-only mode, or `--gnu` for full GNU compatibility.
+All utilities support:
+- `--auto` — Automatically select optimal backend (default)
+- `--gpu` — Force GPU (Metal on macOS, Vulkan on Linux)
+- `--cpu` — Force CPU backend (SIMD-optimized)
+- `--gnu` — Force GNU implementation (gnu build only)
+- `--metal` — Force Metal backend (macOS only)
+- `--vulkan` — Force Vulkan backend
+
+Use `-V` or `--verbose` to see timing and backend information.
 
 ## Packages
 
@@ -50,16 +64,18 @@ Use `--cpu` to force CPU-only mode, or `--gnu` for full GNU compatibility.
 
 ### GNU Feature Parity Summary
 
-Each tool includes native implementations of common features, with GNU-compatible fallback for advanced features:
+Each tool includes native implementations with GPU and SIMD optimization:
 
-| Tool | Native Features | GPU-Accelerated | GNU Fallback |
-|------|----------------|-----------------|--------------|
-| **grep** | `-i` `-w` `-v` `-F` `-n` `-c` `-l` `-L` `-q` `-o` `-A/-B/-C` `-r` `--color` | Pattern matching | `-E` `-P` regex |
-| **sed** | `s///gi` `/d` `/p` `y///` `&` `-i` `-n` `-e` line addressing | Substitution | Backrefs, hold space, branching |
-| **find** | `-name` `-iname` `-path` `-type` `-maxdepth` `-not` `-empty` `-size` `-mtime` `-prune` | Glob matching | `-exec` `-delete` `-regex` |
-| **gawk** | Pattern matching, fields, `-F` `gsub` `length` `substr` `index` `toupper` `tolower` `NR` `NF` | Pattern + fields | Full AWK language |
+| Tool | GPU+SIMD Features | GPU VM Features | GNU Fallback (gnu build) |
+|------|-------------------|-----------------|--------------------------|
+| **grep** | `-e` `-E` `-G` `-P` `-F` `-i` `-w` `-v` `-n` `-c` `-l` `-L` `-q` `-o` `-A/-B/-C` `-r` `--color` | — | — |
+| **sed** | `s///gi` `/d` `/p` `-i` `-n` `-E` | `y///` `-e` line addressing | Backrefs, hold space, branching |
+| **find** | `-name` `-iname` `-path` `-ipath` `-regex` `-iregex` | — | `-exec` `-delete` `-newer` |
+| **gawk** | `/pattern/` `{print $N}` `-F` `-i` `-v` `length` `substr` `index` `toupper` `tolower` `NR` `NF` `gsub` regex | BEGIN/END, variables, if/while/for, math functions | arrays, printf |
 
-Use `--gnu` flag for any unsupported feature to fall back to GNU implementation.
+**Optimization key**: `[GPU+SIMD]` means the feature runs on GPU compute shaders (Metal/Vulkan) with SIMD-optimized CPU fallback. `[GPU VM]` means features are compiled to bytecode and executed on a GPU virtual machine. Use `--help` on any tool to see optimization annotations for each flag.
+
+Use `--gnu` flag (gnu build only) for unsupported features to fall back to GNU implementation.
 
 ### Libraries
 
@@ -139,8 +155,12 @@ Requirements:
 - Native `-prune PATTERN` directory pruning
 
 ### gawk
-- Native built-in functions: `length()`, `substr()`, `index()`, `toupper()`, `tolower()`
+- **GPU Bytecode VM**: Complex AWK programs compile to bytecode and execute on GPU
+  - Supports: variables, arithmetic, comparisons, control flow (if/while/for), math functions
+  - Each GPU thread processes one input line independently
+- Native built-in functions: `length()`, `substr()`, `index()`, `toupper()`, `tolower()`, `sin()`, `cos()`, `sqrt()`, `log()`, `exp()`, `int()`
 - Native special variables: `NR`, `NF`
+- Native GPU regex: Thompson NFA execution on Metal and Vulkan
 - Full backend parity (CPU, Metal, Vulkan produce identical results)
 
 ## License
