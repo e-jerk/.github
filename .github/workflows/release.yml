@@ -116,20 +116,25 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  update-formula:
+  update-homebrew-formulas:
     needs: release
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Generate GitHub App token
+        uses: actions/create-github-app-token@v2
+        id: app-token
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          app-id: ${{ vars.APP_ID }}
+          private-key: ${{ secrets.PRIVATE_KEY }}
+          owner: e-jerk
+          repositories: homebrew-utils,homebrew-utils-gnu
 
       - name: Get version from tag
         id: version
         run: |
           VERSION=${GITHUB_REF#refs/tags/}
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "VERSION_NO_V=${VERSION#v}" >> $GITHUB_OUTPUT
           echo "BASE_URL=https://github.com/${{ github.repository }}/releases/download/$VERSION" >> $GITHUB_OUTPUT
 
       - name: Calculate release tarball SHA256s
@@ -146,32 +151,23 @@ jobs:
               echo "${output_name^^}=$SHA256" >> $GITHUB_OUTPUT
             done
           done
-          
 
-      - name: Update Homebrew formula
+      - name: Checkout homebrew-utils (pure)
+        uses: actions/checkout@v4
+        with:
+          repository: e-jerk/homebrew-utils
+          token: ${{ steps.app-token.outputs.token }}
+          path: homebrew-utils
+
+      - name: Update formula in homebrew-utils (pure)
+        working-directory: homebrew-utils
         run: |
-          FORMULA_GNU="Formula/${{ inputs.binary_name }}-gnu.rb"
           FORMULA="Formula/${{ inputs.binary_name }}.rb"
-          VERSION="${{ steps.version.outputs.VERSION }}"
-
-          if [ -f "$FORMULA_GNU" ]; then
-            # Update version
-            sed -i "s|version \".*\"|version \"${VERSION#v}\"|" "$FORMULA_GNU"
-
-            # Update SHA256 placeholders or existing hashes
-            sed -i "s|PLACEHOLDER_SHA256_MACOS_ARM64|${{ steps.sha.outputs.MACOS_ARM64_GNU }}|" "$FORMULA_GNU"
-            sed -i "s|PLACEHOLDER_SHA256_LINUX_AMD64|${{ steps.sha.outputs.LINUX_AMD64_GNU }}|" "$FORMULA_GNU"
-            sed -i "s|PLACEHOLDER_SHA256_LINUX_ARM64|${{ steps.sha.outputs.LINUX_ARM64_GNU }}|" "$FORMULA_GNU"
-
-            # Update existing hashes for subsequent releases
-            sed -i "s|sha256 \"[a-f0-9]\{64\}\" # macos-arm64|sha256 \"${{ steps.sha.outputs.MACOS_ARM64_GNU }}\" # macos-arm64|" "$FORMULA_GNU"
-            sed -i "s|sha256 \"[a-f0-9]\{64\}\" # linux-amd64|sha256 \"${{ steps.sha.outputs.LINUX_AMD64_GNU }}\" # linux-amd64|" "$FORMULA_GNU"
-            sed -i "s|sha256 \"[a-f0-9]\{64\}\" # linux-arm64|sha256 \"${{ steps.sha.outputs.LINUX_ARM64_GNU }}\" # linux-arm64|" "$FORMULA_GNU"
-          fi
+          VERSION="${{ steps.version.outputs.VERSION_NO_V }}"
 
           if [ -f "$FORMULA" ]; then
             # Update version
-            sed -i "s|version \".*\"|version \"${VERSION#v}\"|" "$FORMULA"
+            sed -i "s|version \".*\"|version \"$VERSION\"|" "$FORMULA"
 
             # Update SHA256 placeholders or existing hashes
             sed -i "s|PLACEHOLDER_SHA256_MACOS_ARM64|${{ steps.sha.outputs.MACOS_ARM64 }}|" "$FORMULA"
@@ -182,12 +178,60 @@ jobs:
             sed -i "s|sha256 \"[a-f0-9]\{64\}\" # macos-arm64|sha256 \"${{ steps.sha.outputs.MACOS_ARM64 }}\" # macos-arm64|" "$FORMULA"
             sed -i "s|sha256 \"[a-f0-9]\{64\}\" # linux-amd64|sha256 \"${{ steps.sha.outputs.LINUX_AMD64 }}\" # linux-amd64|" "$FORMULA"
             sed -i "s|sha256 \"[a-f0-9]\{64\}\" # linux-arm64|sha256 \"${{ steps.sha.outputs.LINUX_ARM64 }}\" # linux-arm64|" "$FORMULA"
+
+            echo "Updated $FORMULA to version $VERSION"
+          else
+            echo "Warning: $FORMULA not found"
+            exit 1
           fi
 
-      - name: Commit and push formula update
+      - name: Commit and push to homebrew-utils
+        working-directory: homebrew-utils
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Formula/ || true
-          git commit -m "Update formula to ${{ steps.version.outputs.VERSION }}" || exit 0
-          git push origin HEAD:main
+          git add Formula/
+          git commit -m "Update ${{ inputs.binary_name }} to ${{ steps.version.outputs.VERSION }}" || exit 0
+          git push origin main
+
+      - name: Checkout homebrew-utils-gnu (gnu)
+        uses: actions/checkout@v4
+        with:
+          repository: e-jerk/homebrew-utils-gnu
+          token: ${{ steps.app-token.outputs.token }}
+          path: homebrew-utils-gnu
+
+      - name: Update formula in homebrew-utils-gnu (gnu)
+        working-directory: homebrew-utils-gnu
+        run: |
+          FORMULA="Formula/${{ inputs.binary_name }}.rb"
+          VERSION="${{ steps.version.outputs.VERSION_NO_V }}"
+
+          if [ -f "$FORMULA" ]; then
+            # Update version
+            sed -i "s|version \".*\"|version \"$VERSION\"|" "$FORMULA"
+
+            # Update SHA256 placeholders or existing hashes
+            sed -i "s|PLACEHOLDER_SHA256_MACOS_ARM64|${{ steps.sha.outputs.MACOS_ARM64_GNU }}|" "$FORMULA"
+            sed -i "s|PLACEHOLDER_SHA256_LINUX_AMD64|${{ steps.sha.outputs.LINUX_AMD64_GNU }}|" "$FORMULA"
+            sed -i "s|PLACEHOLDER_SHA256_LINUX_ARM64|${{ steps.sha.outputs.LINUX_ARM64_GNU }}|" "$FORMULA"
+
+            # Update existing hashes for subsequent releases
+            sed -i "s|sha256 \"[a-f0-9]\{64\}\" # macos-arm64|sha256 \"${{ steps.sha.outputs.MACOS_ARM64_GNU }}\" # macos-arm64|" "$FORMULA"
+            sed -i "s|sha256 \"[a-f0-9]\{64\}\" # linux-amd64|sha256 \"${{ steps.sha.outputs.LINUX_AMD64_GNU }}\" # linux-amd64|" "$FORMULA"
+            sed -i "s|sha256 \"[a-f0-9]\{64\}\" # linux-arm64|sha256 \"${{ steps.sha.outputs.LINUX_ARM64_GNU }}\" # linux-arm64|" "$FORMULA"
+
+            echo "Updated $FORMULA to version $VERSION"
+          else
+            echo "Warning: $FORMULA not found"
+            exit 1
+          fi
+
+      - name: Commit and push to homebrew-utils-gnu
+        working-directory: homebrew-utils-gnu
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/
+          git commit -m "Update ${{ inputs.binary_name }} to ${{ steps.version.outputs.VERSION }}" || exit 0
+          git push origin main
