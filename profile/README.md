@@ -26,15 +26,20 @@ Each utility is available in **two variants**:
 ### Homebrew (macOS/Linux)
 
 ```bash
-# Install pure builds (default, self-contained)
-brew install e-jerk/utils/gpu-utils
+# Pure builds (self-contained, no dependencies)
+brew tap e-jerk/utils
+brew install e-jerk/utils/utils          # all 4 tools
+brew install e-jerk/utils/grep           # individual
 
-# Install gnu builds (with GNU fallback)
-brew install e-jerk/utils/gpu-utils-gnu
+# GNU builds (--gnu flag for full POSIX compliance)
+brew tap e-jerk/utils-gnu
+brew install e-jerk/utils-gnu/utils-gnu  # all 4 tools
+brew install e-jerk/utils-gnu/sed        # individual
+```
 
-# Or install individually
-brew install e-jerk/grep/grep       # pure
-brew install e-jerk/grep/grep-gnu   # gnu
+**macOS**: Add Homebrew bin to PATH to override Apple's built-in tools:
+```bash
+echo 'export PATH="$(brew --prefix)/bin:$PATH"' >> ~/.zshrc
 ```
 
 ### Backend Selection
@@ -56,9 +61,9 @@ Use `-V` or `--verbose` to see timing and backend information.
 | Package | Description | Tests | Version |
 |---------|-------------|-------|---------|
 | [grep](https://github.com/e-jerk/grep) | GPU-accelerated grep with context lines, recursive search, color output | 42/42 | v0.1.0 |
-| [sed](https://github.com/e-jerk/sed) | GPU-accelerated sed with multiple expressions, line addressing | 37/37 | v0.1.0 |
-| [find](https://github.com/e-jerk/find) | GPU-accelerated find with size/time filters, prune support | 36/36 | v0.1.0 |
-| [gawk](https://github.com/e-jerk/gawk) | GPU-accelerated awk with built-in functions, NR/NF variables | 32/32 | v0.1.0 |
+| [sed](https://github.com/e-jerk/sed) | GPU-accelerated sed with multiple expressions, line addressing | 37/37 | v0.2.0 |
+| [find](https://github.com/e-jerk/find) | GPU-accelerated find with size/time filters, prune support | 36/36 | v0.2.0 |
+| [gawk](https://github.com/e-jerk/gawk) | GPU-accelerated awk with built-in functions, NR/NF variables | 32/32 | v0.2.0 |
 
 **Total: 147 GNU compatibility tests passing**
 
