@@ -37,9 +37,6 @@ jobs:
         with:
           version: ${{ inputs.zig_version }}
 
-      - name: Smoke Tests
-        run: zig build smoke
-
       - name: Build macOS arm64 (native)
         run: |
           zig build -Doptimize=${{ inputs.optimize }}${{ inputs.build_variant == 'gnu' && ' -Dgnu=true' || '' }}

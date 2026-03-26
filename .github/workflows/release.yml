@@ -144,15 +144,39 @@ jobs:
       - name: Calculate release tarball SHA256s
         id: sha
         run: |
+          set -euo pipefail
+          BASE_URL="${{ steps.version.outputs.BASE_URL }}"
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          BINARY="${{ inputs.binary_name }}"
+
           for target in "macos-arm64" "linux-amd64" "linux-arm64"; do
+            # Convert hyphens to underscores for valid output variable names
+            target_upper="${target^^}"
+            target_upper="${target_upper//-/_}"
             for variant in "-gnu" ""; do
-              curl -sL "${{ steps.version.outputs.BASE_URL }}/${{ inputs.binary_name }}${variant}-${target}-${{ steps.version.outputs.VERSION }}.tar.gz" -o "${{ inputs.binary_name }}${variant}-${target}.tar.gz"
-              SHA256=$(sha256sum "${{ inputs.binary_name }}${variant}-${target}.tar.gz" | cut -d' ' -f1)
-              output_name="${target}"
-              if [ "$variant" == "-gnu" ]; then
-                output_name="${target}_GNU"
+              FILE="${BINARY}${variant}-${target}-${VERSION}.tar.gz"
+              URL="${BASE_URL}/${FILE}"
+
+              # Download with retries
+              for attempt in 1 2 3 4 5; do
+                curl -fsSL "$URL" -o "$FILE" 2>/dev/null && break
+                echo "Download attempt $attempt failed, retrying in 10s..."
+                sleep 10
+              done
+
+              if [ ! -s "$FILE" ]; then
+                echo "ERROR: Failed to download $FILE"
+                exit 1
               fi
-              echo "${output_name^^}=$SHA256" >> $GITHUB_OUTPUT
+
+              SHA256=$(sha256sum "$FILE" | cut -d' ' -f1)
+              echo "Downloaded $FILE: $SHA256"
+
+              if [ "$variant" == "-gnu" ]; then
+                echo "${target_upper}_GNU=$SHA256" >> "$GITHUB_OUTPUT"
+              else
+                echo "${target_upper}=$SHA256" >> "$GITHUB_OUTPUT"
+              fi
             done
           done
 
