@@ -86,8 +86,14 @@ jobs:
           mv ./zig-out/bin/${{ inputs.binary_name }}-gnu-linux-amd64 ./zig-out/bin/${{ inputs.binary_name }}
           chmod +x ./zig-out/bin/${{ inputs.binary_name }}
 
-      - name: Run GNU compatibility tests
+      - name: Run GNU compatibility tests in Alpine container
         run: |
-          export PATH="$PWD/zig-out/bin:$PATH"
-          chmod +x gnu-tests.sh
-          ./gnu-tests.sh
+          docker run --rm \
+            -v "$PWD:/workspace" \
+            -w /workspace \
+            alpine:3.19 \
+            sh -c '
+              apk add --no-cache bash coreutils grep pcre2 vulkan-loader mesa-vulkan-swrast
+              export PATH="/workspace/zig-out/bin:$PATH"
+              bash /workspace/gnu-tests.sh
+            '
