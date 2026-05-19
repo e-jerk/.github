@@ -10,7 +10,7 @@ on:
       zig_version:
         description: 'Zig version to use'
         type: string
-        default: '0.15.2'
+        default: '0.16.0'
 
 jobs:
   # Only run Zig tests on macOS (has MoltenVK for Vulkan support)
