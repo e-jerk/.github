@@ -18,7 +18,7 @@ on:
       zig_version:
         description: 'Zig version to use'
         type: string
-        default: '0.15.2'
+        default: '0.16.0'
 
 jobs:
   build-macos:
