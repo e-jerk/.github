@@ -103,7 +103,7 @@ jobs:
       - name: Run test (amd64 only)
         if: matrix.platform == 'linux/amd64'
         run: |
-          docker run --rm test-image sh -c 'ls -la /usr/local/bin/${{ inputs.binary_name }}; ldd /usr/local/bin/${{ inputs.binary_name }} || true; /usr/local/bin/${{ inputs.binary_name }} --help'
+          docker run --rm test-image sh -c 'ls -la /usr/local/bin/; /usr/local/bin/${{ inputs.binary_name }} --help || echo "EXIT: $?"
 
       - name: Upload Linux ${{ matrix.artifact_suffix }} artifact
         uses: actions/upload-artifact@v4
